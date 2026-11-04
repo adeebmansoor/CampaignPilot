@@ -55,3 +55,19 @@ def test_clear_message_when_everything_is_busy():
     c = Scripted({"main": [BUSY] * 3, "backup": [BUSY] * 3})
     with pytest.raises(RuntimeError, match="high demand; wait a minute"):
         c.generate_json(CampaignReview, "s", "u")
+
+
+def test_free_tier_quota_is_reported_not_retried():
+    no_free = RuntimeError("429 RESOURCE_EXHAUSTED. Quota exceeded for metric: "
+                           "generate_content_free_tier_requests, limit: 0, model: main")
+    c = Scripted({"main": [no_free], "backup": [no_free]})
+    with pytest.raises(RuntimeError, match="usage limit or can't use these models"):
+        c.generate_json(CampaignReview, "s", "u")
+    assert c.calls == ["main", "backup"] and c.sleeps == []
+
+
+def test_per_minute_rate_limit_is_retried():
+    rpm = RuntimeError("429 RESOURCE_EXHAUSTED. Too many requests, please retry in 20s.")
+    c = Scripted({"main": [rpm, OK]})
+    c.generate_json(CampaignReview, "s", "u")
+    assert c.calls == ["main", "main"] and len(c.sleeps) == 1

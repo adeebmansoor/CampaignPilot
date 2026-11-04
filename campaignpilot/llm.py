@@ -42,6 +42,8 @@ class Embedder(Protocol):
 TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "INTERNAL",
                      "DEADLINE_EXCEEDED", "timed out", "timeout", "overloaded", "high demand")
 UNAVAILABLE_MARKERS = ("404", "NOT_FOUND", "no longer available")
+# Quota that won't reset within a run: daily limits, or a model with no free-tier access ("limit: 0").
+HARD_QUOTA_MARKERS = ("limit: 0", "perday", "per_day", "per day", "free_tier", "billing")
 
 
 def is_transient(err: Exception) -> bool:
@@ -89,6 +91,7 @@ class GeminiClient:
     def generate_json(self, schema: type[T], system: str, user: str) -> T:
         started = time.perf_counter()
         errors: list[str] = []
+        last_raw = ""
         for model in self.models:
             bad_output_retried = False
             attempt = 0
@@ -99,6 +102,12 @@ class GeminiClient:
                     return result
                 except Exception as e:  # noqa: BLE001 - classified below
                     msg = str(e)
+                    low = msg.lower().replace(" ", "")
+                    if ("429" in msg or "resource_exhausted" in low or "quota" in low) and any(
+                            m.replace(" ", "") in low for m in HARD_QUOTA_MARKERS):
+                        log.warning("model %s: quota exhausted or not on your plan: %s", model, msg[:300])
+                        errors.append(f"{model}: quota not available for this API key")
+                        break
                     if any(m.lower() in msg.lower() for m in UNAVAILABLE_MARKERS):
                         log.warning("model %s is not available (%s); trying the next model", model, msg[:120])
                         errors.append(f"{model}: not available")
@@ -111,7 +120,9 @@ class GeminiClient:
                         self._sleep(wait)
                         continue
                     if is_transient(e):
-                        errors.append(f"{model}: busy after {self._retries} retries")
+                        kind = "rate-limited" if ("429" in msg or "quota" in low) else "busy"
+                        errors.append(f"{model}: {kind} after {self._retries} retries")
+                        last_raw = msg
                         break
                     if not bad_output_retried:  # malformed / missing JSON: ask once more
                         bad_output_retried = True
@@ -119,9 +130,15 @@ class GeminiClient:
                         continue
                     errors.append(f"{model}: {msg[:200]}")
                     break
-        busy = all("busy" in e or "not available" in e for e in errors)
-        hint = " Google's servers are under high demand; wait a minute and run it again." if busy else ""
-        raise RuntimeError(f"Gemini could not write the {schema.__name__} ({'; '.join(errors)}).{hint}")
+        if any("quota" in e or "rate-limited" in e for e in errors):
+            hint = (" Your API key has hit its usage limit or can't use these models on the free tier."
+                    " Check https://aistudio.google.com/usage, or set GEMINI_MODEL to a model your key can use.")
+        elif all("busy" in e or "not available" in e for e in errors):
+            hint = " Google's servers are under high demand; wait a minute and run it again."
+        else:
+            hint = ""
+        detail = f" Last error from Google: {last_raw[:240]}" if last_raw else ""
+        raise RuntimeError(f"Gemini could not write the {schema.__name__} ({'; '.join(errors)}).{hint}{detail}")
 
 
 class GeminiEmbedder:

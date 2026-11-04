@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
     # Tried in order when the main model is overloaded or unavailable (comma-separated).
-    gemini_fallback_models: str = "gemini-3.7-flash"
+    gemini_fallback_models: str = "gemini-3.7-flash,gemini-3.5-flash-lite"
     # Retries per model for temporary errors (503 high demand, 429 rate limit, timeouts).
     llm_retries: int = 3
     gemini_embedding_model: str = "models/gemini-embedding-001"

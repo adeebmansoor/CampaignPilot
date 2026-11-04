@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # "gemini" for real calls, "fake" for offline demos and tests.
     llm_provider: str = "gemini"
     google_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_embedding_model: str = "models/gemini-embedding-001"
     llm_temperature: float = 0.4
     # Seconds the fake LLM waits per call, so offline demos show live progress.

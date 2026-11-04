@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_embedding_model: str = "models/gemini-embedding-001"
     llm_temperature: float = 0.4
+    # Seconds the fake LLM waits per call, so offline demos show live progress.
+    fake_llm_delay: float = 0.0
 
     # --- Storage ---------------------------------------------------------
     database_url: str = f"sqlite:///{ROOT_DIR / 'data' / 'campaignpilot.db'}"
@@ -37,6 +39,13 @@ class Settings(BaseSettings):
     tools_mode: str = "mcp"
     max_revisions: int = 2
     review_pass_score: int = 7
+
+    # --- Public demo protection ---------------------------------------
+    # If set, the web UI asks for this code and the API requires it
+    # (X-Access-Code header) before starting or deciding runs.
+    access_code: str = ""
+    # Global cap on new runs per hour, to protect your free Gemini quota.
+    max_runs_per_hour: int = 30
 
     # --- Pipeline --------------------------------------------------------
     raw_data_dir: str = str(ROOT_DIR / "data" / "raw")

@@ -106,6 +106,10 @@ class FakeLLMClient:
     def generate_json(self, schema: type[T], system: str, user: str) -> T:
         from campaignpilot.fake_responses import respond
 
+        delay = get_settings().fake_llm_delay
+        if delay:
+            time.sleep(delay)
+
         return schema.model_validate(respond(schema.__name__, system, user))
 
 

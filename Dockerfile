@@ -9,7 +9,10 @@ RUN pip install -r requirements.txt
 COPY campaignpilot ./campaignpilot
 COPY ui ./ui
 COPY .streamlit ./.streamlit
-COPY data/knowledge ./data/knowledge
+# Knowledge docs live outside /app/data so the shared data volume starts empty
+# (avoids a first-start race when several containers mount it at once).
+COPY data/knowledge ./knowledge
+ENV KNOWLEDGE_DIR=/app/knowledge
 
 # run as a non-root user
 RUN useradd --create-home app && mkdir -p /app/data && chown -R app /app

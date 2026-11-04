@@ -16,6 +16,4 @@ pydantic-settings>=2.6,<3
 fastapi>=0.115
 uvicorn[standard]>=0.32
 python-dotenv>=1.0
-# UI
-streamlit>=1.40
 requests>=2.32

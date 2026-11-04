@@ -2,10 +2,10 @@
 
 ## Request flow
 
-1. The user submits a goal (UI → `POST /campaigns`).
-2. `agents/service.py` creates a `thread_id` and invokes the LangGraph graph with a SQLite checkpointer.
+1. The user submits a goal (web app → `POST /campaigns`). The access code and hourly run cap are checked first.
+2. `agents/service.py` creates a `thread_id` and runs the LangGraph graph in a background worker thread with a SQLite checkpointer. The API returns immediately with `status: running`; the web app polls `GET /campaigns/{id}` every ~1.2 s. Because the checkpointer saves state after every agent, each poll shows which agents have finished (`trace`) and which one is running (`next`). Add `?wait=true` to block instead (CLI, tests).
 3. The graph runs **plan → segment → research → write → review**. If the review fails and revisions remain (`MAX_REVISIONS`, default 2), it loops back to **write** with the issues.
-4. **human_approval** calls `interrupt()`. LangGraph saves the state and the API returns `status: awaiting_approval` with the draft.
+4. **human_approval** calls `interrupt()`. LangGraph saves the state and the run reports `status: awaiting_approval` with the draft.
 5. The user decides (`POST /campaigns/{id}/decision`). The graph resumes from the checkpoint with `Command(resume=...)`:
    - `revise` → back to **write** with the feedback, then review and approval again
    - `approve` → **finalize** renders personalised messages for the sample customers and writes them to `data/outbox/`
@@ -67,3 +67,13 @@ generated_campaigns  (one row per finished agent run)
 ## Configuration
 
 All settings live in `campaignpilot/config.py` and can be overridden with environment variables or `.env`. See `.env.example`.
+
+## Deployment modes
+
+| Mode | Database | Vector store | Processes |
+|---|---|---|---|
+| `start.bat` / `start.sh` (Docker Compose) | PostgreSQL container | Qdrant server container | `app` (API + web) and `pipeline` (hourly refresh) |
+| Hugging Face Space / plain `docker run` | SQLite inside the container | Qdrant on-disk mode | `scripts/start-app.sh`: pipeline once, then the API |
+| Local Python | SQLite | Qdrant on-disk mode | same as above |
+
+In on-disk mode only one process may open the Qdrant folder at a time. That works because the pipeline finishes before the API starts, and in `TOOLS_MODE=mcp` only the MCP server subprocess opens Qdrant.

@@ -50,8 +50,18 @@ jobs:
       - run: python -m campaignpilot.cli "Convert active free users to Pro with an email" --auto-approve
 
   docker:
+    # builds the deploy image and checks the single-container start-up actually serves the app
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t campaignpilot:ci .
+      - name: Smoke test the container
+        run: |
+          docker run -d --name cp -p 8000:8000 -e LLM_PROVIDER=fake campaignpilot:ci
+          for i in $(seq 1 60); do curl -fs localhost:8000/health && break; sleep 2; done
+          curl -fs localhost:8000/ | grep -q CampaignPilot
+          curl -fs -X POST "localhost:8000/campaigns?wait=true" -H 'Content-Type: application/json' \
+            -d '{"goal": "Convert active free users to Pro with an email"}' | grep -q awaiting_approval
+      - if: failure()
+        run: docker logs cp

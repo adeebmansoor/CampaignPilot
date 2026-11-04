@@ -4,7 +4,9 @@
 
 You describe a campaign goal in plain English — *"Convert free users who were active in the last two weeks to Pro"* — and a team of AI agents plans it, finds the right audience in the customer database, researches brand rules and past results, writes A/B variants, reviews them against brand guidelines, and then **pauses for a human to approve** before anything is sent.
 
-![CI](https://github.com/adeebmansoor/campaignpilot/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/adeebmansoor/campaignpilot/actions/workflows/ci.yml/badge.svg)](https://github.com/adeebmansoor/campaignpilot/actions/workflows/ci.yml)
+
+![CampaignPilot: agents working through a Google Ads campaign, waiting for approval](docs/screenshot.png)
 
 ---
 
@@ -19,6 +21,8 @@ You describe a campaign goal in plain English — *"Convert free users who were 
 | **Reviewer** | Scores the draft and lists issues; sends it back for a rewrite if needed | Code-based brand guardrails **+** LLM review |
 | **Human** | Approves, rejects, or requests changes with feedback | LangGraph `interrupt()` + persisted checkpoints |
 | **Finalize** | Renders personalised messages and writes them to the outbox (simulated send) | — |
+
+The web app shows each agent's progress live as a rack of "flight strips", previews every message the way it would look in an inbox, a search ad or a social feed, and keeps a sticky approval bar until you decide.
 
 Everything runs on a realistic synthetic dataset for a fictional SaaS company, **Brightloop**: 2,000 customers, 12 past campaigns across email, social and ads, and ~10,000 funnel events (sent → open → click → convert).
 
@@ -42,7 +46,7 @@ flowchart LR
     L --- T2 & T3 & T4
     Q --- T5
 
-    subgraph Agents["LangGraph workflow"]
+    subgraph Agents["LangGraph workflow (background worker)"]
         P[Planner] --> S[Segmenter] --> R[Researcher] --> W[Writer] --> RV[Reviewer]
         RV -- issues --> W
         RV --> H{{Human approval<br/>interrupt}}
@@ -51,59 +55,66 @@ flowchart LR
     end
     S & R -. MCP client .-> MCP
 
-    UI[Streamlit UI] --> API[FastAPI] --> Agents
+    UI[Web app<br/>HTML/CSS/JS] -- polls progress --> API[FastAPI] --> Agents
 ```
 
 More detail in [`docs/architecture.md`](docs/architecture.md).
 
 ## Tech stack
 
-- **Agents:** LangGraph (state graph, conditional edges, human-in-the-loop `interrupt`, SQLite checkpointer)
+- **Agents:** LangGraph (state graph, conditional edges, human-in-the-loop `interrupt`, SQLite checkpointer), runs executed in a background worker and polled for live progress
 - **LLM:** Google Gemini (`gemini-2.5-flash`) via `langchain-google-genai`, structured outputs with Pydantic
 - **RAG:** Qdrant vector database + Gemini embeddings
 - **MCP:** Official MCP Python SDK (2.x) — custom server with 5 tools and 1 resource; agents use it as a client over stdio
-- **Data:** PostgreSQL (SQLite for local dev), SQLAlchemy 2, pandas ETL
-- **API / UI:** FastAPI, Streamlit
-- **Ops:** Docker, Docker Compose, GitHub Actions (lint, tests, Postgres job, Docker build), pytest (40 tests)
+- **Data:** PostgreSQL (SQLite in single-container mode), SQLAlchemy 2, pandas ETL
+- **Web:** FastAPI + a dependency-free HTML/CSS/JavaScript front end (no build step)
+- **Ops:** Docker, Docker Compose, GitHub Actions (lint, 43 tests, Postgres job, container smoke test, auto-deploy to Hugging Face Spaces)
 
 ---
 
-## Quick start
+## Run it
 
-### Option A — Docker (recommended)
+### On your computer (one click)
+
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop) running and a free [Gemini API key](https://aistudio.google.com/apikey).
 
 ```bash
 git clone https://github.com/adeebmansoor/campaignpilot.git
-cd campaignpilot
-cp .env.example .env          # then put your Gemini key in GOOGLE_API_KEY
-docker compose up --build
 ```
 
-- UI: http://localhost:8501
-- API docs: http://localhost:8000/docs
-- Qdrant dashboard: http://localhost:6333/dashboard
+- **Windows:** open the `campaignpilot` folder and double-click **`start.bat`**. To stop, double-click **`stop.bat`**.
+- **Mac/Linux:** `cd campaignpilot && ./start.sh`. To stop, `./stop.sh`.
 
-The `pipeline` service loads the warehouse and indexes the knowledge base on start-up, then refreshes every hour.
+The first start creates `.env` and opens it so you can paste your Gemini key after `GOOGLE_API_KEY=`. Run the start script again and the app opens at **http://localhost:8000** (API docs at `/docs`, Qdrant dashboard at http://localhost:6333/dashboard). Data is kept between restarts.
 
-### Option B — Local Python (no Docker)
+### Free online deployment (Hugging Face Spaces)
+
+The repo deploys itself to a free [Hugging Face Space](https://huggingface.co/docs/hub/spaces-sdks-docker) after every successful CI run on `main`. One-time setup:
+
+1. Create a free account at https://huggingface.co.
+2. Create an access token at https://huggingface.co/settings/tokens with **Write** permission.
+3. In this GitHub repo, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+   - `HF_TOKEN`: the Hugging Face token
+   - `GOOGLE_API_KEY`: your Gemini key (stored as a secret on the Space, never in code)
+   - `DEMO_ACCESS_CODE` *(optional)*: a code visitors must type before running agents, to protect your free Gemini quota
+4. Go to the **Actions** tab, open **Deploy to Hugging Face Spaces**, and click **Run workflow** (later pushes deploy automatically).
+
+The app appears at `https://<your-hf-username>-campaignpilot.hf.space` after the build (about 5 minutes). On the free tier the Space sleeps after a period without visitors and wakes up on the next visit; its data is regenerated on each start. Public runs are also capped by `MAX_RUNS_PER_HOUR` (20 on the Space).
+
+### Local Python (no Docker)
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 cp .env.example .env                                   # add GOOGLE_API_KEY
-
-python -m campaignpilot.pipeline.run                   # 1. load data + build the vector index
-uvicorn campaignpilot.api.main:app --reload            # 2. API on :8000
-streamlit run ui/app.py                                # 3. UI on :8501 (new terminal)
+sh scripts/start-app.sh                                # loads data, then serves http://localhost:8000
 ```
 
 Local mode uses SQLite and an on-disk Qdrant folder, so no other services are needed.
 
 ### No API key? Use demo mode
 
-Set `LLM_PROVIDER=fake` in `.env`. The whole workflow runs with deterministic offline responses (this is also what CI uses). The fake writer's first draft deliberately breaks a brand rule, so you can watch the reviewer send it back.
-
-Get a free Gemini key at https://aistudio.google.com/apikey.
+Set `LLM_PROVIDER=fake` in `.env` (add `FAKE_LLM_DELAY=1` to watch the strips move). The whole workflow runs with deterministic offline responses; this is also what CI uses. The fake writer's first draft deliberately breaks a brand rule, so you can watch the reviewer send it back.
 
 ---
 
@@ -121,16 +132,17 @@ You'll see the agent trace, the SQL segment, the review and both variants, then 
 **API:**
 
 ```bash
-# start a run — returns when it pauses for approval
-curl -X POST localhost:8000/campaigns -H 'Content-Type: application/json' \
+# start a run — ?wait=true returns when it pauses for approval
+# (without it the call returns at once and you poll GET /campaigns/<thread_id>)
+curl -X POST "localhost:8000/campaigns?wait=true" -H 'Content-Type: application/json' \
   -d '{"goal": "Convert active free users to Pro with an email about AI weekly reports"}'
 
 # request changes
-curl -X POST localhost:8000/campaigns/<thread_id>/decision -H 'Content-Type: application/json' \
+curl -X POST "localhost:8000/campaigns/<thread_id>/decision?wait=true" -H 'Content-Type: application/json' \
   -d '{"decision": "revise", "feedback": "Mention the annual plan discount in variant B"}'
 
 # approve
-curl -X POST localhost:8000/campaigns/<thread_id>/decision -H 'Content-Type: application/json' \
+curl -X POST "localhost:8000/campaigns/<thread_id>/decision?wait=true" -H 'Content-Type: application/json' \
   -d '{"decision": "approve"}'
 ```
 
@@ -163,7 +175,9 @@ These are the parts worth talking about in an interview:
 5. **Structured outputs everywhere.** Every agent returns a Pydantic model, so the next agent receives validated data instead of free text.
 6. **One tool layer, two transports.** The same tool functions are exposed via MCP (`TOOLS_MODE=mcp`) or called in-process (`TOOLS_MODE=direct`). The agents don't know the difference.
 7. **Idempotent pipeline.** Each ETL run validates rows (bad plans, unknown foreign keys, duplicates are rejected and counted) and replaces the warehouse in one transaction, so re-runs never duplicate data and a failed run leaves the old data intact.
-8. **Testable without an API key.** A fake LLM client and hash embeddings make the full workflow deterministic. The test suite starts the real MCP server over stdio, and a separate CI job runs the pipeline and agents on PostgreSQL.
+8. **Live progress without websockets.** Runs execute in a background worker; the checkpointer saves state after every agent, and the browser polls it. Simple, robust behind any proxy, and the same mechanism that makes runs resumable.
+9. **Safe to put online.** An optional access code (constant-time compare) and a global hourly run cap protect the free LLM quota on the public demo. All model output is rendered with `textContent`, never `innerHTML`, so generated copy can't inject markup.
+10. **Testable without an API key.** A fake LLM client and hash embeddings make the full workflow deterministic. The test suite starts the real MCP server over stdio, and a separate CI job runs the pipeline and agents on PostgreSQL.
 
 ## Project structure
 
@@ -182,12 +196,14 @@ campaignpilot/
 ├── rag/store.py          # chunking, embeddings, Qdrant index + search
 ├── pipeline/             # synthetic data generator, ETL, metrics, scheduler
 ├── db/                   # SQLAlchemy models and session
-├── api/main.py           # FastAPI
+├── api/main.py           # FastAPI: REST API, access code, rate limit, serves the web app
+├── web/                  # front end: index.html, styles.css, app.js
 ├── llm.py                # Gemini client + fake client for tests
 └── cli.py                # terminal interface
 data/knowledge/           # brand guidelines, products, past learnings (RAG source)
-ui/app.py                 # Streamlit front end
-tests/                    # 40 tests: pipeline, SQL guard, guardrails, RAG, MCP, graph, API
+scripts/                  # start-app.sh (single container), deploy_space.py (Hugging Face)
+start.bat / start.sh      # one-click local start (stop.bat / stop.sh to stop)
+tests/                    # 43 tests: pipeline, SQL guard, guardrails, RAG, MCP, graph, API
 ```
 
 ## Tests
@@ -205,7 +221,7 @@ Read the code in the same order the data flows, and run each piece as you go:
 2. `rag/store.py` — call `search("banned words")` in a Python shell and look at the scores.
 3. `tools/marketing_tools.py` → `mcp_server/server.py` → `tools/client.py` — run `tests/test_mcp.py` and try breaking the SQL guard.
 4. `agents/schemas.py` → `agents/graph.py` — follow one run through `python -m campaignpilot.cli "..."` with `LLM_PROVIDER=fake`, then switch to Gemini and compare.
-5. `agents/service.py` → `api/main.py` → `ui/app.py`.
+5. `agents/service.py` (background runs) → `api/main.py` → `web/app.js` (polling and rendering).
 
 ## Roadmap
 

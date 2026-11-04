@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CampaignPilot</title>
+  <meta name="description" content="A team of AI agents that plans, targets, writes and reviews marketing campaigns, then waits for your approval.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231C2632'/%3E%3Cpath d='M6 20h20M10 14h12' stroke='%23E9A825' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="wordmark" href="/" aria-label="CampaignPilot home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6"/><path d="M6 20h20M10 14h12"/></svg>
+      CampaignPilot
+    </a>
+    <nav class="views" aria-label="Views">
+      <button type="button" class="view-tab" data-view="campaigns" aria-current="page">Campaigns</button>
+      <button type="button" class="view-tab" data-view="analytics">Analytics</button>
+    </nav>
+    <p class="config" id="config" aria-live="polite"></p>
+  </header>
+
+  <main id="view-campaigns" class="layout">
+    <aside class="rail">
+      <form id="brief-form" class="brief" novalidate>
+        <h2>New campaign</h2>
+        <label for="goal">What should this campaign achieve?</label>
+        <textarea id="goal" name="goal" rows="5" required minlength="10" maxlength="1000"
+          placeholder="Win back customers who haven't logged in for two months"></textarea>
+
+        <fieldset class="channel">
+          <legend>Channel</legend>
+          <label><input type="radio" name="channel" value="" checked><span>Let the planner pick</span></label>
+          <label><input type="radio" name="channel" value="email"><span>Email</span></label>
+          <label><input type="radio" name="channel" value="social"><span>Social</span></label>
+          <label><input type="radio" name="channel" value="ads"><span>Ads</span></label>
+        </fieldset>
+
+        <div id="access-field" class="access" hidden>
+          <label for="access-code">Access code</label>
+          <input id="access-code" type="password" autocomplete="off">
+          <p class="hint">This demo is protected so the free AI quota isn't used up.</p>
+        </div>
+
+        <p id="form-error" class="form-error" role="alert" hidden></p>
+        <button id="run-button" type="submit" class="btn btn-primary">Run agents</button>
+
+        <div class="examples">
+          <p>Or start from an example:</p>
+          <button type="button" class="example" data-channel="email">Convert free users who were active in the last two weeks to Pro, focusing on automated AI weekly reports</button>
+          <button type="button" class="example" data-channel="email">Win back customers who have been inactive for more than 60 days</button>
+          <button type="button" class="example" data-channel="social">Show agencies on LinkedIn how client workspaces cut reporting time</button>
+          <button type="button" class="example" data-channel="ads">Google Ads campaign for e-commerce and SaaS teams to start a free trial</button>
+        </div>
+      </form>
+
+      <section class="history" aria-labelledby="history-title">
+        <h2 id="history-title">Finished campaigns</h2>
+        <ol id="history-list" class="history-list"></ol>
+        <p id="history-empty" class="muted">Approved and rejected campaigns show up here.</p>
+      </section>
+    </aside>
+
+    <section class="workspace" aria-live="polite">
+      <div id="empty-state" class="empty">
+        <h1>Describe a campaign. Seven agents take it from there.</h1>
+        <p>CampaignPilot plans the brief, finds the right customers with SQL, checks brand rules and past results, writes two versions, reviews them, and then waits for you. Nothing is sent until you approve it.</p>
+        <ol class="empty-steps">
+          <li>Plan</li><li>Find audience</li><li>Research</li><li>Write</li><li>Review</li><li>Your approval</li><li>Send</li>
+        </ol>
+      </div>
+
+      <div id="run" class="run" hidden>
+        <header class="run-head">
+          <p id="run-status" class="run-status"></p>
+          <h1 id="run-goal" class="run-goal"></h1>
+        </header>
+
+        <ol id="strips" class="strips" aria-label="Agent progress"></ol>
+
+        <p id="run-error" class="run-error" role="alert" hidden></p>
+
+        <section id="audience" class="panel" hidden>
+          <h2>Audience</h2>
+          <div class="audience-grid">
+            <p class="audience-count"><strong id="audience-count"></strong> customers</p>
+            <p id="audience-why" class="audience-why"></p>
+          </div>
+          <details>
+            <summary>SQL the segmenter wrote</summary>
+            <pre id="audience-sql" class="sql"></pre>
+          </details>
+          <div class="table-wrap"><table id="audience-sample" class="data"></table></div>
+        </section>
+
+        <section id="messages" class="panel" hidden>
+          <div class="panel-head">
+            <h2>Messages</h2>
+            <p id="send-time" class="muted"></p>
+          </div>
+          <div id="variants" class="variants"></div>
+        </section>
+
+        <section id="review" class="panel" hidden>
+          <div class="panel-head">
+            <h2>Review</h2>
+            <p id="review-score" class="score"></p>
+          </div>
+          <ul id="review-issues" class="checklist"></ul>
+          <ul id="review-suggestions" class="suggestions"></ul>
+          <details>
+            <summary>Sources the agents used</summary>
+            <ul id="sources" class="sources"></ul>
+          </details>
+        </section>
+
+        <section id="result" class="panel result" hidden>
+          <h2 id="result-title"></h2>
+          <p id="result-text"></p>
+          <div class="table-wrap"><table id="result-table" class="data"></table></div>
+        </section>
+
+        <form id="decision" class="decision" hidden>
+          <label for="feedback">Changes you want (needed for a rewrite)</label>
+          <div class="decision-row">
+            <input id="feedback" type="text" maxlength="2000" placeholder="Mention the annual plan discount in version B">
+            <button type="submit" data-decision="revise" class="btn">Request changes</button>
+            <button type="submit" data-decision="reject" class="btn btn-quiet">Reject</button>
+            <button type="submit" data-decision="approve" class="btn btn-primary">Approve and send</button>
+          </div>
+          <p id="decision-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-analytics" class="analytics" hidden>
+    <header class="analytics-head">
+      <h1>How past campaigns performed</h1>
+      <p class="muted">The agents read these numbers before writing. Data is synthetic, generated for the fictional company Brightloop.</p>
+    </header>
+    <section class="panel">
+      <h2>Channel benchmarks</h2>
+      <div id="bench" class="bench"></div>
+    </section>
+    <section class="panel">
+      <h2>Past campaigns, most conversions per person reached first</h2>
+      <div class="table-wrap"><table id="past" class="data"></table></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Built by <a href="https://www.linkedin.com/in/adeeb-mansoor-96634a289/">Adeeb Mansoor</a>. LangGraph agents, Qdrant retrieval and an MCP tool server. <a href="https://github.com/adeebmansoor/campaignpilot">Source on GitHub</a>. <a href="/docs">API docs</a>.</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

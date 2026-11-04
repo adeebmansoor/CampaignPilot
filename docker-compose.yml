@@ -32,7 +32,8 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.20.0
     ports: ["6333:6333"]   # dashboard: http://localhost:6333/dashboard
-    volumes: [qdrantdata:/qdrant/storage]
+    # new volume name so the v1.20 server starts with fresh storage
+    volumes: [qdrant-storage:/qdrant/storage]
     restart: unless-stopped
 
   # Loads the warehouse and indexes the knowledge base, then refreshes every hour.
@@ -50,5 +51,5 @@ services:
 
 volumes:
   pgdata:
-  qdrantdata:
+  qdrant-storage:
   appdata:

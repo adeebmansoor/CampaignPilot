@@ -1,0 +1,64 @@
+# docker compose up --build
+#   UI        http://localhost:8501
+#   API docs  http://localhost:8000/docs
+#   Qdrant    http://localhost:6333/dashboard
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg2://campaignpilot:campaignpilot@postgres:5432/campaignpilot
+    QDRANT_URL: http://qdrant:6333
+    CHECKPOINT_DB: /app/data/checkpoints.sqlite
+  volumes:
+    - appdata:/app/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: campaignpilot
+      POSTGRES_PASSWORD: campaignpilot
+      POSTGRES_DB: campaignpilot
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaignpilot"]
+      interval: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    ports: ["6333:6333"]
+    volumes: [qdrantdata:/qdrant/storage]
+
+  # Loads the warehouse and indexes the knowledge base once, then refreshes every hour.
+  pipeline:
+    <<: *app
+    command: ["python", "-m", "campaignpilot.pipeline.run", "--every", "3600"]
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    ports: ["8000:8000"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+
+  ui:
+    <<: *app
+    command: ["streamlit", "run", "ui/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    environment:
+      API_URL: http://api:8000
+    ports: ["8501:8501"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  qdrantdata:
+  appdata:

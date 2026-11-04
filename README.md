@@ -63,7 +63,7 @@ More detail in [`docs/architecture.md`](docs/architecture.md).
 ## Tech stack
 
 - **Agents:** LangGraph (state graph, conditional edges, human-in-the-loop `interrupt`, SQLite checkpointer), runs executed in a background worker and polled for live progress
-- **LLM:** Google Gemini (`gemini-2.5-flash`) via `langchain-google-genai`, structured outputs with Pydantic
+- **LLM:** Google Gemini (`gemini-3.8-flash`) via `langchain-google-genai`, structured outputs with Pydantic
 - **RAG:** Qdrant vector database + Gemini embeddings
 - **MCP:** Official MCP Python SDK (2.x) — custom server with 5 tools and 1 resource; agents use it as a client over stdio
 - **Data:** PostgreSQL (SQLite in single-container mode), SQLAlchemy 2, pandas ETL

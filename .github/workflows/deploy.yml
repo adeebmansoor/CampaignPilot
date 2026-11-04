@@ -29,5 +29,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           ACCESS_CODE: ${{ secrets.DEMO_ACCESS_CODE }}
+          GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
+          GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: python scripts/deploy_space.py

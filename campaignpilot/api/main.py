@@ -101,7 +101,7 @@ def web_app() -> FileResponse:
 @app.get("/health")
 def health() -> dict:
     s = get_settings()
-    return {"status": "ok", "llm_provider": s.llm_provider, "model": s.gemini_model if s.llm_provider == "gemini" else "fake",
+    return {"status": "ok", "llm_provider": s.llm_provider, "model": {"gemini": s.gemini_model, "gateway": f"LLM Gateway, route {s.gateway_route}"}.get(s.llm_provider, "fake"),
             "tools_mode": s.tools_mode, "access_code_required": bool(s.access_code)}
 
 

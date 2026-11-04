@@ -101,6 +101,22 @@ The repo deploys itself to a free [Hugging Face Space](https://huggingface.co/do
 
 The app appears at `https://<your-hf-username>-campaignpilot.hf.space` after the build (about 5 minutes). On the free tier the Space sleeps after a period without visitors and wakes up on the next visit; its data is regenerated on each start. Public runs are also capped by `MAX_RUNS_PER_HOUR` (20 on the Space).
 
+### Route AI calls through the LLM Gateway (recommended)
+
+[LLM Gateway](https://github.com/adeebmansoor/llm-gateway) is the companion project: one API in front of Gemini and Groq with retries, circuit breakers, fallback, caching, rate limits and budgets. When Gemini is overloaded or out of free quota, the gateway answers from another Gemini model or from Groq, and the agents carry on.
+
+1. Start the gateway (its `start.bat` / `start.sh`).
+2. In this project's `.env`:
+   ```env
+   LLM_PROVIDER=gateway
+   GATEWAY_URL=http://host.docker.internal:8100
+   GATEWAY_API_KEY=gw-campaignpilot-local-key     # must match GATEWAY_API_KEYS in the gateway's .env
+   GATEWAY_ROUTE=default
+   ```
+3. Restart CampaignPilot. Every agent call now shows up on the gateway dashboard at http://localhost:8100 with the route it took.
+
+For the online version, add `GATEWAY_URL` (your gateway Space URL) and `GATEWAY_API_KEY` as GitHub secrets; the next deploy switches the Space to the gateway.
+
 ### Local Python (no Docker)
 
 ```bash
@@ -225,7 +241,7 @@ Read the code in the same order the data flows, and run each piece as you go:
 
 ## Roadmap
 
-- [ ] Route all LLM calls through an LLM gateway (fallback, caching, cost tracking)
+- [x] Route all LLM calls through an LLM gateway (fallback, caching, cost tracking): see [llm-gateway](https://github.com/adeebmansoor/llm-gateway)
 - [ ] Real send integrations (SendGrid / Mailchimp for email, Meta and Google Ads APIs)
 - [ ] Prompt evaluation set: score segment SQL and copy quality across ~30 goals when prompts change
 - [ ] A/B test results feeding back into the knowledge base automatically

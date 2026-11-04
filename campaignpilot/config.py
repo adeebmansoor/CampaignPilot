@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"
     google_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
+    # Tried in order when the main model is overloaded or unavailable (comma-separated).
+    gemini_fallback_models: str = "gemini-3.7-flash"
+    # Retries per model for temporary errors (503 high demand, 429 rate limit, timeouts).
+    llm_retries: int = 3
     gemini_embedding_model: str = "models/gemini-embedding-001"
     llm_temperature: float = 0.4
     # Seconds the fake LLM waits per call, so offline demos show live progress.

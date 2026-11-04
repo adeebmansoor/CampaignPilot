@@ -12,10 +12,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import random
 import re
 import time
 from functools import lru_cache
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -38,33 +39,89 @@ class Embedder(Protocol):
 
 
 # --------------------------------------------------------------------- Gemini
+TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "INTERNAL",
+                     "DEADLINE_EXCEEDED", "timed out", "timeout", "overloaded", "high demand")
+UNAVAILABLE_MARKERS = ("404", "NOT_FOUND", "no longer available")
+
+
+def is_transient(err: Exception) -> bool:
+    text = f"{type(err).__name__} {err}"
+    return any(m.lower() in text.lower() for m in TRANSIENT_MARKERS)
+
+
 class GeminiClient:
+    """Gemini with resilience:
+    * temporary errors (503 high demand, 429, timeouts) are retried with
+      exponential backoff and jitter;
+    * if a model stays unavailable, or has been retired (404), the next model
+      in GEMINI_FALLBACK_MODELS is tried;
+    * invalid or empty structured output gets one more attempt.
+    """
+
     name = "gemini"
 
-    def __init__(self, model: str, api_key: str, temperature: float):
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
+    def __init__(self, model: str, api_key: str, temperature: float,
+                 fallbacks: list[str] | None = None, retries: int = 3, sleep=time.sleep):
         if not api_key:
             raise RuntimeError("GOOGLE_API_KEY is not set. Add it to .env or use LLM_PROVIDER=fake.")
-        self._llm = ChatGoogleGenerativeAI(
-            model=model, google_api_key=api_key, temperature=temperature, max_retries=3, timeout=60
-        )
+        self._api_key, self._temperature = api_key, temperature
+        self.models = [model] + [m for m in (fallbacks or []) if m and m != model]
+        self._retries = max(0, retries)
+        self._sleep = sleep
+        self._clients: dict[str, Any] = {}
+
+    def _client(self, model: str):
+        if model not in self._clients:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            # retries are handled here, so the SDK's own retry loop is kept short
+            self._clients[model] = ChatGoogleGenerativeAI(
+                model=model, google_api_key=self._api_key, temperature=self._temperature, max_retries=1, timeout=90
+            )
+        return self._clients[model]
+
+    def _invoke(self, model: str, schema: type[T], system: str, user: str) -> T:
+        result = self._client(model).with_structured_output(schema).invoke([("system", system), ("human", user)])
+        if result is None:
+            raise ValueError("model returned no structured output")
+        return result
 
     def generate_json(self, schema: type[T], system: str, user: str) -> T:
-        structured = self._llm.with_structured_output(schema)
         started = time.perf_counter()
-        last_err: Exception | None = None
-        for attempt in range(2):  # one extra try if the model returns invalid JSON
-            try:
-                result = structured.invoke([("system", system), ("human", user)])
-                if result is None:
-                    raise ValueError("model returned no structured output")
-                log.info("gemini %s ok in %.2fs", schema.__name__, time.perf_counter() - started)
-                return result
-            except Exception as e:  # noqa: BLE001 - surface after retry
-                last_err = e
-                log.warning("gemini %s attempt %d failed: %s", schema.__name__, attempt + 1, e)
-        raise RuntimeError(f"LLM failed to produce {schema.__name__}: {last_err}")
+        errors: list[str] = []
+        for model in self.models:
+            bad_output_retried = False
+            attempt = 0
+            while True:
+                try:
+                    result = self._invoke(model, schema, system, user)
+                    log.info("gemini %s via %s ok in %.2fs", schema.__name__, model, time.perf_counter() - started)
+                    return result
+                except Exception as e:  # noqa: BLE001 - classified below
+                    msg = str(e)
+                    if any(m.lower() in msg.lower() for m in UNAVAILABLE_MARKERS):
+                        log.warning("model %s is not available (%s); trying the next model", model, msg[:120])
+                        errors.append(f"{model}: not available")
+                        break
+                    if is_transient(e) and attempt < self._retries:
+                        wait = min(30.0, 2.0 * (2 ** attempt)) * random.uniform(0.75, 1.25)
+                        attempt += 1
+                        log.warning("model %s busy (%s); retry %d/%d in %.1fs",
+                                    model, msg[:80], attempt, self._retries, wait)
+                        self._sleep(wait)
+                        continue
+                    if is_transient(e):
+                        errors.append(f"{model}: busy after {self._retries} retries")
+                        break
+                    if not bad_output_retried:  # malformed / missing JSON: ask once more
+                        bad_output_retried = True
+                        log.warning("model %s gave unusable output for %s: %s", model, schema.__name__, msg[:160])
+                        continue
+                    errors.append(f"{model}: {msg[:200]}")
+                    break
+        busy = all("busy" in e or "not available" in e for e in errors)
+        hint = " Google's servers are under high demand; wait a minute and run it again." if busy else ""
+        raise RuntimeError(f"Gemini could not write the {schema.__name__} ({'; '.join(errors)}).{hint}")
 
 
 class GeminiEmbedder:
@@ -120,7 +177,8 @@ def get_llm() -> LLMClient:
     if s.llm_provider == "fake":
         return FakeLLMClient()
     if s.llm_provider == "gemini":
-        return GeminiClient(s.gemini_model, s.google_api_key, s.llm_temperature)
+        fallbacks = [m.strip() for m in s.gemini_fallback_models.split(",")]
+        return GeminiClient(s.gemini_model, s.google_api_key, s.llm_temperature, fallbacks, s.llm_retries)
     raise ValueError(f"Unknown LLM_PROVIDER: {s.llm_provider}")
 
 

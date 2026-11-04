@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT_DIR / ".env", extra="ignore")
 
     # --- LLM -------------------------------------------------------------
-    # "gemini" for real calls, "fake" for offline demos and tests.
+    # "gemini" = call Gemini directly, "gateway" = go through the LLM Gateway, "fake" = offline demo/tests.
     llm_provider: str = "gemini"
     google_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     llm_retries: int = 3
     gemini_embedding_model: str = "models/gemini-embedding-001"
     llm_temperature: float = 0.4
+    # LLM_PROVIDER=gateway: route every call through the LLM Gateway project
+    gateway_url: str = ""
+    gateway_api_key: str = ""
+    gateway_route: str = "default"
+    gateway_embedding_route: str = "default"
     # Seconds the fake LLM waits per call, so offline demos show live progress.
     fake_llm_delay: float = 0.0
 

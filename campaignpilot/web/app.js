@@ -73,7 +73,7 @@
   async function loadConfig() {
     try {
       state.config = await api("GET", "/health");
-      const llm = state.config.llm_provider === "fake" ? "Offline demo model" : (state.config.model || "Gemini");
+      const llm = state.config.llm_provider === "fake" ? "Offline demo model" : (state.config.model || "Gemini");  // e.g. "LLM Gateway, route default"
       const tools = state.config.tools_mode === "mcp" ? "tools over MCP" : "tools in-process";
       $("#config").replaceChildren(el("b", { text: llm }), ", ", tools);
       $("#access-field").hidden = !state.config.access_code_required;

@@ -9,6 +9,8 @@ x-app: &app
     CHECKPOINT_DB: /app/data/checkpoints.sqlite
   volumes:
     - appdata:/app/data
+  extra_hosts:
+    - "host.docker.internal:host-gateway"   # lets the app reach the LLM Gateway on your computer (Linux; built in on Docker Desktop)
   depends_on:
     postgres:
       condition: service_healthy

@@ -76,7 +76,15 @@ def main() -> int:
         api.add_space_secret(repo_id, "GOOGLE_API_KEY", key)
     if code := os.environ.get("ACCESS_CODE", "").strip():
         api.add_space_secret(repo_id, "ACCESS_CODE", code)
-    for name, value in SPACE_VARIABLES.items():
+    # Route AI calls through the deployed LLM Gateway when its URL and key are provided.
+    gateway_url = os.environ.get("GATEWAY_URL", "").strip()
+    if gateway_url and (gw_key := os.environ.get("GATEWAY_API_KEY", "").strip()):
+        api.add_space_secret(repo_id, "GATEWAY_API_KEY", gw_key)
+        api.add_space_variable(repo_id, "GATEWAY_URL", gateway_url)
+        variables = {**SPACE_VARIABLES, "LLM_PROVIDER": "gateway"}
+    else:
+        variables = SPACE_VARIABLES
+    for name, value in variables.items():
         api.add_space_variable(repo_id, name, value)
 
     with tempfile.TemporaryDirectory() as tmp:

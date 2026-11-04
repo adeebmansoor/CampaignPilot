@@ -187,6 +187,87 @@ class FakeLLMClient:
         return schema.model_validate(respond(schema.__name__, system, user))
 
 
+# -------------------------------------------------------------------- Gateway
+class GatewayClient:
+    """Sends every LLM call through the LLM Gateway project
+    (https://github.com/adeebmansoor/llm-gateway), which handles retries,
+    provider fallback (Gemini -> Groq), caching, rate limits and budgets.
+
+    The Pydantic schema is sent as an OpenAI-style json_schema response
+    format; the gateway validates the JSON, and this client validates it
+    again with Pydantic (one retry if that still fails).
+    """
+
+    name = "gateway"
+
+    def __init__(self, base_url: str, api_key: str, route: str, temperature: float, timeout: float = 180.0,
+                 transport=None):
+        import httpx
+
+        if not base_url or not api_key:
+            raise RuntimeError("Set GATEWAY_URL and GATEWAY_API_KEY to use LLM_PROVIDER=gateway.")
+        self.route, self.temperature = route, temperature
+        self._http = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, transport=transport,
+                                  headers={"Authorization": f"Bearer {api_key}"})
+
+    def _post(self, path: str, body: dict) -> dict:
+        import httpx
+
+        for attempt in range(2):
+            try:
+                r = self._http.post(path, json=body)
+            except httpx.TransportError as e:
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                raise RuntimeError(f"Can't reach the LLM Gateway at {self._http.base_url}: {e}") from e
+            if r.status_code >= 400:
+                try:
+                    err = r.json().get("error", {})
+                except ValueError:
+                    err = {"message": r.text[:300]}
+                tried = "; ".join(f"{a.get('target')}: {a.get('outcome')}" for a in err.get("attempts", [])[-4:])
+                raise RuntimeError(f"LLM Gateway returned {r.status_code}: {err.get('message', 'error')}"
+                                   + (f" (tried {tried})" if tried else ""))
+            return r.json()
+        raise RuntimeError("unreachable")
+
+    def generate_json(self, schema: type[T], system: str, user: str) -> T:
+        body = {
+            "model": self.route,
+            "temperature": self.temperature,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()}},
+        }
+        last: Exception | None = None
+        for _ in range(2):
+            data = self._post("/v1/chat/completions", body)
+            g = data.get("gateway", {})
+            log.info("gateway %s via %s (cache %s, fallback %s, %sms)", schema.__name__, g.get("target"),
+                     g.get("cache"), g.get("fallback"), g.get("latency_ms"))
+            try:
+                return schema.model_validate_json(data["choices"][0]["message"]["content"])
+            except Exception as e:  # noqa: BLE001 - pydantic constraints the JSON schema can't express
+                last = e
+                body = {**body, "temperature": min(1.0, self.temperature + 0.2)}  # different sample, and not cached
+        raise RuntimeError(f"The gateway's answer didn't fit {schema.__name__}: {last}")
+
+
+class GatewayEmbedder:
+    name = "gateway"
+
+    def __init__(self, client: GatewayClient, route: str = "default"):
+        self._client, self._route = client, route
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for i in range(0, len(texts), 64):
+            data = self._client._post("/v1/embeddings", {"model": self._route, "input": texts[i:i + 64]})
+            out.extend(d["embedding"] for d in sorted(data["data"], key=lambda d: d["index"]))
+        return out
+
+
 # -------------------------------------------------------------------- factory
 @lru_cache
 def get_llm() -> LLMClient:
@@ -196,12 +277,16 @@ def get_llm() -> LLMClient:
     if s.llm_provider == "gemini":
         fallbacks = [m.strip() for m in s.gemini_fallback_models.split(",")]
         return GeminiClient(s.gemini_model, s.google_api_key, s.llm_temperature, fallbacks, s.llm_retries)
+    if s.llm_provider == "gateway":
+        return GatewayClient(s.gateway_url, s.gateway_api_key, s.gateway_route, s.llm_temperature)
     raise ValueError(f"Unknown LLM_PROVIDER: {s.llm_provider}")
 
 
 @lru_cache
 def get_embedder() -> Embedder:
     s = get_settings()
+    if s.llm_provider == "gateway":
+        return GatewayEmbedder(get_llm(), s.gateway_embedding_route)
     if s.llm_provider == "gemini" and s.google_api_key:
         return GeminiEmbedder(s.gemini_embedding_model, s.google_api_key)
     return HashEmbedder()
